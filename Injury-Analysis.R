@@ -37,34 +37,32 @@ pbp_2011 <- load_pbp(2011)
 injuries_2011 <- load_injuries(2011)
 pbp_2010 <- load_pbp(2010)
 injuries_2010 <- load_injuries(2010)
-pbp_2009 <- load_pbp(2009)
-injuries_2009 <- load_injuries(2009)
+# pbp_2009 <- load_pbp(2009)
+# injuries_2009 <- load_injuries(2009)
 
 
 
-pbp <- rbind(
-             pbp_2009, pbp_2010, pbp_2011,
+pbp <- rbind(pbp_2010, pbp_2011,
              pbp_2012, pbp_2013, pbp_2014, pbp_2015, pbp_2016, pbp_2017,
              pbp_2018, pbp_2019, pbp_2020, pbp_2021, pbp_2022, pbp_2023, 
              pbp_2024)
 
-injuries <- rbind(
-                  injuries_2009, injuries_2010, injuries_2011,
+injuries <- rbind(injuries_2010, injuries_2011,
                   injuries_2012, injuries_2013, injuries_2014, injuries_2015, 
                   injuries_2016, injuries_2017, injuries_2018, injuries_2019,
                   injuries_2020, injuries_2021, injuries_2022, injuries_2023, 
                   injuries_2024)
 
 
-rm(pbp_2009, pbp_2010, pbp_2011,
+rm(pbp_2010, pbp_2011,
    pbp_2012, pbp_2013, pbp_2014, pbp_2015, pbp_2016, pbp_2017,
    pbp_2018, pbp_2019, pbp_2020, pbp_2021, pbp_2022, pbp_2023, 
-   #pbp_2024, 
-   injuries_2009, injuries_2010, injuries_2011,
+   pbp_2024, 
+   injuries_2010, injuries_2011,
    injuries_2012, injuries_2013, injuries_2014, injuries_2015, 
    injuries_2016, injuries_2017, injuries_2018, injuries_2019,
-   injuries_2020, injuries_2021, injuries_2022, injuries_2023) 
-   #injuries_2024)
+   injuries_2020, injuries_2021, injuries_2022, injuries_2023, 
+   injuries_2024)
 
 extract_injury_info <- function(desc) {
   # Regular expression to capture team abbreviation and player's abbreviated name
@@ -80,7 +78,7 @@ extract_injury_info <- function(desc) {
 }
 
 
-pbp_2024 <- pbp_2024 %>%
+pbp <- pbp %>%
   rowwise() %>%
   mutate(
     injury_info = list(extract_injury_info(desc)),
@@ -91,7 +89,7 @@ pbp_2024 <- pbp_2024 %>%
 
 
 # Getting abbreviated name from injury data set
-injuries_2024 <- injuries_2024 %>%
+injuries <- injuries %>%
   mutate(
     abv_name = paste0(str_sub(full_name, 1, 1), ".", word(full_name, 2)),
     date_only = substr(date_modified, 1, 10)
@@ -101,8 +99,37 @@ injuries_2024 <- injuries_2024 %>%
 
 # Joining injury and play by play data
 # ONLY DOING 2024 FOR NOW - NOT ALL INJURY HAS ALL/ANY MODIFIED DATES
-combined_data <- pbp_2024 %>%
-  left_join(injuries_2024, by = c("player_injured" = "abv_name", "week" = "week", "player_inj_team" = "team")) #, "game_date" = "date_only"))
+pbp$game_date <- as.Date(pbp$game_date)
+injuries$date_only <- as.Date(injuries$date_only)
+
+combined_data <- pbp %>%
+  left_join(injuries, by = c("player_injured" = "abv_name", "week" = "week", "player_inj_team" = "team")) 
 
 
+# adding column to designate an injury occured in game
+# player_injured is based on the column created in original pbp that shows wheteher play was injured on the play
+# for injury locations, will only consider in game injuries
+combined_data <- combined_data %>%
+  mutate(in_game_injury = ifelse(!is.na(player_injured), 1, 0),
+         knee_injury_in_game = ifelse(in_game_injury == 1, ifelse(report_primary_injury == "Knee", 1, 0), 0), #creating binary variable for in game knee injury
+         lower_body_injury_in_game = ifelse(report_primary_injury %in% c("Achilles", "Ankle", "Calf", "Feet", 
+                                                                         "Fibula", "Foot", "Glute", "Groin", 
+                                                                         "Hamstring", "Heel", "Hip", "Knee",
+                                                                         "Knees", "left Foot", "Pelvis", "Quad",
+                                                                         "Quadricep", "Right Ankle", "Right Knee",
+                                                                         "Shin", "Tailbone", "Thigh", "Tibia",
+                                                                         "Toe", "Toes"), 1, 0) #creating binary variable for in game lower body injury
+         )
+
+# selecting columns that we want to include in the model 
+new_data <- combined_data %>% 
+  select(
+         )
+
+
+########## Other things to add ##########
+
+# 1) Correlation, initial feature importance, EDA of variables (plays w/ injuries vs plays w/o injuries)
+# 2) Create model
+# 3) Evaluate using accuracy, precision, recall, ...
 

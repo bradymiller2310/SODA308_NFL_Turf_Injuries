@@ -2,6 +2,7 @@ library(nflreadr)
 library(dplyr)
 library(stringr)
 library(tidyverse)
+library(ggplot2)
 
 # Loading in 2024 play by play data
 pbp_2024 <- load_pbp(2024)
@@ -140,6 +141,93 @@ new_data <- combined_data %>%
          pass_defense_2_player_name, fumbled_1_player_name, fumble_recovery_1_player_name, sack_player_name,
          half_sack_1_player_name, half_sack_2_player_name
          )
+
+
+########## Exploratory Data Analysis ##########
+count_data <- as.data.frame(table(new_data$in_game_injury))
+colnames(count_data) <- c("Injuries", "count")
+
+ggplot(count_data, aes(x = factor(Injuries), y = count)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  geom_text(aes(label = count), vjust = -0.5) +
+  labs(title = "Count of NFL Plays 2010-2024 With and Without Injuries",
+       x = "", 
+       y = "Count") +
+  scale_x_discrete(labels = c("No Injury", "Injury")) +
+  theme_minimal()
+
+####
+injury_counts <- data.frame(
+  variable = c("Knee", "Lower Body"),
+  count = c(sum(new_data$knee_injury_in_game == 1, na.rm = TRUE), sum(new_data$lower_body_injury_in_game == 1))
+)
+ggplot(injury_counts, aes(x = variable, y = count)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = count), vjust = -0.5) + # Add count labels above bars
+  labs(x = "", y = "Count",
+       title = "Count of Plays with Lower Body and Knee Injuries") +
+  scale_x_discrete(labels = c("Knee Injuries", "Lower Body Injuries")) +
+  theme_minimal()
+
+####
+new_data %>%
+  group_by(player_inj_team) %>%
+  summarize(count = sum(in_game_injury == 1, na.rm = TRUE)) %>%
+  filter(count > 0) %>%
+  ggplot() + 
+  geom_bar(stat = "identity", aes(x = reorder(player_inj_team, -count), y = count)) +
+  labs(y = "In Game Injury Count", 
+       x = "NFL Teams",
+       title = "Number of In Game Injuries for Each NFL Team (2010-2024)") + 
+  theme_minimal()
+
+####
+
+new_data$surface <- trimws(new_data$surface, which = "right")
+
+new_data$surface <- ifelse(new_data$surface == "a_turf", "astroturf", new_data$surface)
+
+surface_type_inj <- data.frame(
+  variable = c("Knee", "Lower Body"),
+  count = c(sum(new_data$knee_injury_in_game == 1, na.rm = TRUE), sum(new_data$lower_body_injury_in_game == 1))
+  
+)
+
+####
+summary_data <- new_data %>%
+  filter(surface != "") %>%
+  group_by(surface) %>%
+  summarise(
+    total_plays = n(),
+    injury_count = sum(in_game_injury, na.rm = TRUE)
+  ) %>%
+  pivot_longer(
+    cols = c(total_plays, injury_count),
+    names_to = "category",
+    values_to = "count"
+  )
+
+# Create the bar chart
+ggplot(summary_data, aes(x = surface, y = count, fill = category)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(
+    values = c("total_plays" = "green", "injury_count" = "red"),
+    labels = c("Injuries", "Total Plays")
+  ) +
+  labs(
+    x = "Field Type",
+    y = "Count",
+    fill = "Category",
+    title = "Total Plays vs Injuries by Field Type"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = count), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5)
+  
+
+
+
 
 
 ########## Other things to add ##########

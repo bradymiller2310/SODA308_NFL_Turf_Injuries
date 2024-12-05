@@ -123,7 +123,22 @@ combined_data <- combined_data %>%
 
 # selecting columns that we want to include in the model 
 new_data <- combined_data %>% 
-  select(
+  select(game_id, home_team, away_team, season_type, week, game_date, quarter_seconds_remaining,
+         half_seconds_remaining, game_seconds_remaining, drive, qtr, down, time, play_type, 
+         yards_gained, pass_length, desc, pass_location, air_yards, yards_after_catch, run_location,
+         total_home_score, total_away_score, wp, home_wp, away_wp, interception, solo_tackle, 
+         penalty, fumble_lost, rusher, receiver, pass, rush, special, player_injured, player_inj_team,
+         season.x, position, report_primary_injury, report_secondary_injury,  report_status, 
+         date_modified, in_game_injury, knee_injury_in_game, lower_body_injury_in_game, stadium, weather,
+         away_score, home_score, roof, surface, temp, wind, touchdown, sack, rush_attempt, pass_attempt, 
+         qb_hit, fumble, complete_pass, passing_yards, rushing_yards, receiving_yards, 
+         tackle_for_loss_1_player_name,tackle_for_loss_2_player_name, qb_hit_1_player_name, 
+         qb_hit_2_player_name, forced_fumble_player_1_player_name, forced_fumble_player_2_player_name,
+         solo_tackle_1_player_name, solo_tackle_2_player_name, assist_tackle_1_player_name, 
+         assist_tackle_2_player_name, assist_tackle_3_player_name, assist_tackle_4_player_name, 
+         tackle_with_assist_1_player_name, tackle_with_assist_2_player_name, pass_defense_1_player_name, 
+         pass_defense_2_player_name, fumbled_1_player_name, fumble_recovery_1_player_name, sack_player_name,
+         half_sack_1_player_name, half_sack_2_player_name
          )
 
 

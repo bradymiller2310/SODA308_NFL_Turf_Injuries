@@ -3,6 +3,9 @@ library(dplyr)
 library(stringr)
 library(tidyverse)
 library(ggplot2)
+library(logistf)
+library(corrplot)
+library(psych)
 
 # Loading in 2024 play by play data
 pbp_2024 <- load_pbp(2024)
@@ -143,6 +146,9 @@ new_data <- combined_data %>%
          )
 
 
+new_data <- new_data %>%
+  filter(rush == 1| pass == 1|special == 1)
+
 ########## Exploratory Data Analysis ##########
 count_data <- as.data.frame(table(new_data$in_game_injury))
 colnames(count_data) <- c("Injuries", "count")
@@ -225,14 +231,150 @@ ggplot(summary_data, aes(x = surface, y = count, fill = category)) +
             position = position_dodge(width = 0.9),
             vjust = -0.5)
   
+### CREATING MORE VARIABLES
+new_data <- new_data %>%
+  mutate(field_type = ifelse(surface == "grass", 0, 1))
+
+
+data <- new_data %>%
+  select(
+    game_id,                   # To identify unique plays
+    field_type,                   # Hypothesis 1 & 2: Turf vs. grass impact
+    roof,
+    in_game_injury,
+    knee_injury_in_game,       # Hypothesis 1: Focus on knee injuries
+    lower_body_injury_in_game, # Hypothesis 2: Lower body injuries
+    temp,                      # Hypothesis 3: Weather conditions
+    wind,                      # Hypothesis 3: Weather conditions
+    position,                  # Hypothesis 4: Skill position players
+    qtr,                       # Game dynamics (early vs. late injury patterns)
+    rush,              # Offensive plays that could impact injuries
+    pass,              # Offensive plays that could impact injuries
+    special,
+    quarter_seconds_remaining, # Time remaining in the current quarter
+    weather
+  )
 
 
 
+newnew_data <- data %>%
+  mutate(
+    # Extract weather condition (e.g., "Light Rain")
+    weather_condition = str_extract(weather, "^[^:]+"),
+    
+    # Extract temperature (numeric value in Fahrenheit)
+    temperature = as.numeric(str_extract(weather, "(?<=Temp: )\\d+")),
+    
+    # Extract humidity (numeric value as a percentage)
+    humidity = as.numeric(str_extract(weather, "(?<=Humidity: )\\d+")),
+    
+    # Extract wind (direction and speed)
+    wind = str_extract(weather, "(?<=Wind: ).+")
+  )
 
+
+newnew_data <- newnew_data %>%
+  mutate(
+    rain = if_else(str_detect(weather_condition, regex("rain", ignore_case = TRUE)), 1, 0), # 1 if 'rain' is present
+    snow = if_else(str_detect(weather_condition, regex("snow", ignore_case = TRUE)), 1, 0),  # 1 if 'snow' is present
+    roof_binary = if_else(roof %in% c("outdoors", "open"), 0, 1)
+  )
+
+
+data <- newnew_data %>%
+  select(
+    game_id, 
+    field_type, # Hypothesis 1 & 2: Turf vs. grass impact
+    roof_binary,
+    knee_injury_in_game,       # Hypothesis 1: Focus on knee injuries
+    lower_body_injury_in_game, # Hypothesis 2: Lower body injuries
+    in_game_injury,
+    position,                  # Hypothesis 4: Skill position players
+    qtr,                       # Game dynamics (early vs. late injury patterns)
+    rush,              # Offensive plays that could impact injuries
+    pass,              # Offensive plays that could impact injuries
+    special,
+    quarter_seconds_remaining, # Time remaining in the current quarter
+    temperature, 
+    wind, 
+    humidity,
+    rain, 
+    snow
+  )
+data$position <- as.character(data$position)
+
+data <- data %>% 
+  filter(position %in% c("C", "CB", "DE", "DT", "FB", "G", "K", "LB", "LS", "P", "QB", "RB", "S", "T", "TE", "WR"))
+
+data$position <- as.factor(data$position)
+
+
+data <- data %>%
+  mutate(new_wind = ifelse(
+    grepl("[0-9]", wind), # Check if there are any numeric characters
+    as.numeric(gsub("[^0-9.-]", "", wind)), # Extract numeric value
+    NA # Assign NA for rows without numeric content
+  ))
+
+model <- lm(lower_body_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
+            quarter_seconds_remaining + temperature + #wind +
+              humidity + rain + snow, data = data)
+
+
+
+summary(model)
+
+### CORRELATION ###
+
+
+
+ 
+### 
+
+
+
+play_injury_data <- new_data %>%
+  select(-c(player_injured, player_inj_team,
+            report_primary_injury, report_secondary_injury,  report_status, 
+            date_modified, knee_injury_in_game, lower_body_injury_in_game))
+
+injury_type_data <- new_data %>%
+  select(-c(player_injured,
+           report_secondary_injury,  report_status, 
+            date_modified, knee_injury_in_game, lower_body_injury_in_game,
+            in_game_injury))
+
+knee_injury_data <- new_data %>%
+  select(-c(player_injured, 
+            report_primary_injury, report_secondary_injury,  report_status, 
+            date_modified, lower_body_injury_in_game,
+            in_game_injury))
+
+
+lower_body_injury_data <- new_data %>%
+  select(-c(player_injured,report_primary_injury, report_secondary_injury,  report_status, 
+            date_modified, knee_injury_in_game,
+            in_game_injury))
+
+
+
+logistf(as.factor(in_game_injury) ~ ., data = play_injury_data)
+
+
+lm(in_game_injury ~ ., data = play_injury_data)
 
 ########## Other things to add ##########
 
 # 1) Correlation, initial feature importance, EDA of variables (plays w/ injuries vs plays w/o injuries)
 # 2) Create model
 # 3) Evaluate using accuracy, precision, recall, ...
+
+# Correlation (get rid of anything below 0.2)
+# Base model to get rid of any features that don't have any impact
+ 
+ 
+
+# CREATE VARIABLE FOR WHETHER PLAY WAS INVOLVED IN THE PLAY (Touched ball or made tackle)
+# MAKE variables 0, 1, 2 for some of injury variables
+# Ex) Knee injury in game --> 0 = no injury, 1 = injury but not knee, 2 = knee injury on play 
 

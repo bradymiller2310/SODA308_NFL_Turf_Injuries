@@ -7,39 +7,45 @@ library(logistf)
 library(corrplot)
 library(psych)
 
+nflreadr::.clear_cache()
 # Loading in 2024 play by play data
 pbp_2024 <- load_pbp(2024)
-
 # Loading in 2024 injury data
 injuries_2024 <- load_injuries(2024)
-
 pbp_2023 <- load_pbp(2023)
 injuries_2023 <- load_injuries(2023)
+nflreadr::.clear_cache()
 pbp_2022 <- load_pbp(2022)
 injuries_2022 <- load_injuries(2022)
 pbp_2021 <- load_pbp(2021)
 injuries_2021 <- load_injuries(2021)
+nflreadr::.clear_cache()
 pbp_2020 <- load_pbp(2020)
 injuries_2020 <- load_injuries(2020)
 pbp_2019 <- load_pbp(2019)
 injuries_2019 <- load_injuries(2019)
+nflreadr::.clear_cache()
 pbp_2018 <- load_pbp(2018)
 injuries_2018 <- load_injuries(2018)
 pbp_2017 <- load_pbp(2017)
 injuries_2017 <- load_injuries(2017)
+nflreadr::.clear_cache()
 pbp_2016 <- load_pbp(2016)
 injuries_2016 <- load_injuries(2016)
 pbp_2015 <- load_pbp(2015)
 injuries_2015 <- load_injuries(2015)
+nflreadr::.clear_cache()
 pbp_2014 <- load_pbp(2014)
 injuries_2014 <- load_injuries(2014)
 pbp_2013 <- load_pbp(2013)
 injuries_2013 <- load_injuries(2013)
+nflreadr::.clear_cache()
 pbp_2012 <- load_pbp(2012)
 injuries_2012 <- load_injuries(2012)
 pbp_2011 <- load_pbp(2011)
+nflreadr::.clear_cache()
 injuries_2011 <- load_injuries(2011)
-pbp_2010 <- load_pbp(2010)
+pbp_2010 <- load_pbp(2010) 
 injuries_2010 <- load_injuries(2010)
 # pbp_2009 <- load_pbp(2009)
 # injuries_2009 <- load_injuries(2009)
@@ -316,52 +322,50 @@ data <- data %>%
     NA # Assign NA for rows without numeric content
   ))
 
-model <- lm(lower_body_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
-            quarter_seconds_remaining + temperature + #wind +
-              humidity + rain + snow, data = data)
+# Lower Body Injury Model
+
+lb_model_reg <- lm(lower_body_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
+            quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+
+summary(lb_model_reg)
 
 
 
-summary(model)
+lb_model_log <- logistf(lower_body_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
+                     quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
 
-### CORRELATION ###
-
-
-
- 
-### 
+summary(lb_model_log)
 
 
+# Knee Injury model
+knee_model_reg <- lm(knee_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
+                     quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
 
-play_injury_data <- new_data %>%
-  select(-c(player_injured, player_inj_team,
-            report_primary_injury, report_secondary_injury,  report_status, 
-            date_modified, knee_injury_in_game, lower_body_injury_in_game))
-
-injury_type_data <- new_data %>%
-  select(-c(player_injured,
-           report_secondary_injury,  report_status, 
-            date_modified, knee_injury_in_game, lower_body_injury_in_game,
-            in_game_injury))
-
-knee_injury_data <- new_data %>%
-  select(-c(player_injured, 
-            report_primary_injury, report_secondary_injury,  report_status, 
-            date_modified, lower_body_injury_in_game,
-            in_game_injury))
-
-
-lower_body_injury_data <- new_data %>%
-  select(-c(player_injured,report_primary_injury, report_secondary_injury,  report_status, 
-            date_modified, knee_injury_in_game,
-            in_game_injury))
+summary(knee_model_reg)
 
 
 
-logistf(as.factor(in_game_injury) ~ ., data = play_injury_data)
+knee_model_log <- logistf(knee_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
+                          quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+
+summary(knee_model_log)
 
 
-lm(in_game_injury ~ ., data = play_injury_data)
+# All injury model
+model_reg <- lm(in_game_injury ~ field_type + roof_binary + position + qtr + rush + pass + special +
+                       quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+
+summary(model_reg)
+
+
+
+model_log <- logistf(in_game_injury ~ field_type + roof_binary + position + qtr + rush + pass + special +
+                            quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+
+summary(model_log)
+
+
+
 
 ########## Other things to add ##########
 

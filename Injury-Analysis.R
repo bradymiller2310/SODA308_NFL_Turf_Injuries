@@ -1,3 +1,4 @@
+### Loading in all necessary libraries ###
 library(nflreadr)
 library(dplyr)
 library(stringr)
@@ -6,11 +7,15 @@ library(ggplot2)
 library(logistf)
 library(corrplot)
 library(psych)
+library(caret)
+library(reshape2)
 
+
+########## Data collection ##########
+
+# Reading in play by play & injury data from nflreader (2010-2024)
 nflreadr::.clear_cache()
-# Loading in 2024 play by play data
 pbp_2024 <- load_pbp(2024)
-# Loading in 2024 injury data
 injuries_2024 <- load_injuries(2024)
 pbp_2023 <- load_pbp(2023)
 injuries_2023 <- load_injuries(2023)
@@ -47,35 +52,33 @@ nflreadr::.clear_cache()
 injuries_2011 <- load_injuries(2011)
 pbp_2010 <- load_pbp(2010) 
 injuries_2010 <- load_injuries(2010)
-# pbp_2009 <- load_pbp(2009)
-# injuries_2009 <- load_injuries(2009)
 
 
 
-pbp <- rbind(pbp_2010, pbp_2011,
-             pbp_2012, pbp_2013, pbp_2014, pbp_2015, pbp_2016, pbp_2017,
-             pbp_2018, pbp_2019, pbp_2020, pbp_2021, pbp_2022, pbp_2023, 
-             pbp_2024)
+### Combining play by play data ###
+pbp <- rbind(pbp_2010, pbp_2011, pbp_2012, pbp_2013, pbp_2014, pbp_2015, 
+             pbp_2016, pbp_2017, pbp_2018, pbp_2019, pbp_2020, pbp_2021,
+             pbp_2022, pbp_2023, pbp_2024)
 
-injuries <- rbind(injuries_2010, injuries_2011,
-                  injuries_2012, injuries_2013, injuries_2014, injuries_2015, 
-                  injuries_2016, injuries_2017, injuries_2018, injuries_2019,
-                  injuries_2020, injuries_2021, injuries_2022, injuries_2023, 
-                  injuries_2024)
+### Combining injury data ###
+injuries <- rbind(injuries_2010, injuries_2011, injuries_2012, injuries_2013,
+                  injuries_2014, injuries_2015, injuries_2016, injuries_2017,
+                  injuries_2018, injuries_2019, injuries_2020, injuries_2021, 
+                  injuries_2022, injuries_2023, injuries_2024)
 
 
-rm(pbp_2010, pbp_2011,
-   pbp_2012, pbp_2013, pbp_2014, pbp_2015, pbp_2016, pbp_2017,
-   pbp_2018, pbp_2019, pbp_2020, pbp_2021, pbp_2022, pbp_2023, 
-   pbp_2024, 
-   injuries_2010, injuries_2011,
-   injuries_2012, injuries_2013, injuries_2014, injuries_2015, 
-   injuries_2016, injuries_2017, injuries_2018, injuries_2019,
-   injuries_2020, injuries_2021, injuries_2022, injuries_2023, 
-   injuries_2024)
+### Removing all individual data sets to clear space ###
+rm(pbp_2010, pbp_2011, pbp_2012, pbp_2013, pbp_2014, pbp_2015, pbp_2016, pbp_2017,
+   pbp_2018, pbp_2019, pbp_2020, pbp_2021, pbp_2022, pbp_2023, pbp_2024, 
+   injuries_2010, injuries_2011, injuries_2012, injuries_2013, injuries_2014,
+   injuries_2015, injuries_2016, injuries_2017, injuries_2018, injuries_2019,
+   injuries_2020, injuries_2021, injuries_2022, injuries_2023, injuries_2024)
 
+
+########## Data Cleaning and Preprocessing ##########
+
+### Function to extract player & team name of who was injured on the play ###
 extract_injury_info <- function(desc) {
-  # Regular expression to capture team abbreviation and player's abbreviated name
   match <- str_match(desc, "(\\b[A-Z]{2,3}\\b)-\\d+-([A-Z]{1,2}\\.[A-Za-z]+)\\swas")
   if (!is.na(match[1])) {
     team_abbr <- match[2]
@@ -87,10 +90,11 @@ extract_injury_info <- function(desc) {
   return(c(player_name, team_abbr))
 }
 
-
+### Adding new columns to play by play of who was injured ###
 pbp <- pbp %>%
   rowwise() %>%
   mutate(
+    # Using function above to get and extract the information
     injury_info = list(extract_injury_info(desc)),
     player_injured = injury_info[[1]],
     player_inj_team = injury_info[[2]]
@@ -98,7 +102,7 @@ pbp <- pbp %>%
   select(-injury_info) 
 
 
-# Getting abbreviated name from injury data set
+### Getting abbreviated name from injury data set for joining purposes ###
 injuries <- injuries %>%
   mutate(
     abv_name = paste0(str_sub(full_name, 1, 1), ".", word(full_name, 2)),
@@ -107,56 +111,115 @@ injuries <- injuries %>%
 
 
 
-# Joining injury and play by play data
-# ONLY DOING 2024 FOR NOW - NOT ALL INJURY HAS ALL/ANY MODIFIED DATES
+### Joining injury and play by play data ###
+
+# Setting data type of data column for joining
 pbp$game_date <- as.Date(pbp$game_date)
 injuries$date_only <- as.Date(injuries$date_only)
 
+# Joining on the name of player injured, their team, and the week it occured
 combined_data <- pbp %>%
   left_join(injuries, by = c("player_injured" = "abv_name", "week" = "week", "player_inj_team" = "team")) 
 
 
-# adding column to designate an injury occured in game
-# player_injured is based on the column created in original pbp that shows wheteher play was injured on the play
-# for injury locations, will only consider in game injuries
+# Adding 3 binary variables to designate injury on play and type
 combined_data <- combined_data %>%
-  mutate(in_game_injury = ifelse(!is.na(player_injured), 1, 0),
-         knee_injury_in_game = ifelse(in_game_injury == 1, ifelse(report_primary_injury == "Knee", 1, 0), 0), #creating binary variable for in game knee injury
-         lower_body_injury_in_game = ifelse(report_primary_injury %in% c("Achilles", "Ankle", "Calf", "Feet", 
+  mutate(
+         # whether or not injury occured on play: use player injured (to check if anyone) & the primary injury as this will indicate if it was game (if not NA) or in practice (is NA)  
+         # ensuring report says it is an injury (not personal matter or other)
+         in_game_injury = ifelse(!is.na(player_injured) & !is.na(report_primary_injury) &
+                                   report_primary_injury != "Not Injury Related" &
+                                   report_primary_injury != "Not injury related - personal matter",
+                                 1, 0),
+         # in game knee injury: injury occured on play and the primary injury is reported as 'knee'
+         knee_injury_in_game = ifelse(in_game_injury == 1, ifelse(report_primary_injury == "Knee", 1, 0), 0), 
+         # lower body injury: must occur in game and injury must be designated as one some lower body location
+         lower_body_injury_in_game = ifelse(in_game_injury == 1 & report_primary_injury %in% c("Achilles", "Ankle", "Calf", "Feet", 
                                                                          "Fibula", "Foot", "Glute", "Groin", 
                                                                          "Hamstring", "Heel", "Hip", "Knee",
                                                                          "Knees", "left Foot", "Pelvis", "Quad",
                                                                          "Quadricep", "Right Ankle", "Right Knee",
                                                                          "Shin", "Tailbone", "Thigh", "Tibia",
-                                                                         "Toe", "Toes"), 1, 0) #creating binary variable for in game lower body injury
+                                                                         "Toe", "Toes"), 1, 0)
          )
 
-# selecting columns that we want to include in the model 
-new_data <- combined_data %>% 
-  select(game_id, home_team, away_team, season_type, week, game_date, quarter_seconds_remaining,
-         half_seconds_remaining, game_seconds_remaining, drive, qtr, down, time, play_type, 
-         yards_gained, pass_length, desc, pass_location, air_yards, yards_after_catch, run_location,
-         total_home_score, total_away_score, wp, home_wp, away_wp, interception, solo_tackle, 
-         penalty, fumble_lost, rusher, receiver, pass, rush, special, player_injured, player_inj_team,
-         season.x, position, report_primary_injury, report_secondary_injury,  report_status, 
-         date_modified, in_game_injury, knee_injury_in_game, lower_body_injury_in_game, stadium, weather,
-         away_score, home_score, roof, surface, temp, wind, touchdown, sack, rush_attempt, pass_attempt, 
-         qb_hit, fumble, complete_pass, passing_yards, rushing_yards, receiving_yards, 
-         tackle_for_loss_1_player_name,tackle_for_loss_2_player_name, qb_hit_1_player_name, 
-         qb_hit_2_player_name, forced_fumble_player_1_player_name, forced_fumble_player_2_player_name,
-         solo_tackle_1_player_name, solo_tackle_2_player_name, assist_tackle_1_player_name, 
-         assist_tackle_2_player_name, assist_tackle_3_player_name, assist_tackle_4_player_name, 
-         tackle_with_assist_1_player_name, tackle_with_assist_2_player_name, pass_defense_1_player_name, 
-         pass_defense_2_player_name, fumbled_1_player_name, fumble_recovery_1_player_name, sack_player_name,
-         half_sack_1_player_name, half_sack_2_player_name
-         )
+### extracting  weather data ###
+combined_data <- combined_data %>%
+  mutate(
+    # Extract weather condition (e.g., "Light Rain")
+    weather_condition = str_extract(weather, "^[^:]+"),
+    # Extract temperature (numeric value in Fahrenheit)
+    temperature = as.numeric(str_extract(weather, "(?<=Temp: )\\d+")),
+    # Extract humidity (numeric value as a percentage)
+    humidity = as.numeric(str_extract(weather, "(?<=Humidity: )\\d+")),
+    # Extract wind (direction and speed)
+    wind = str_extract(weather, "(?<=Wind: ).+")
+  )
 
 
-new_data <- new_data %>%
-  filter(rush == 1| pass == 1|special == 1)
+### creating binary variables for whether there was snow or rain, and if stadium is open/closed based on roof, and wind value
+combined_data <- combined_data %>%
+  mutate(
+    rain = if_else(str_detect(weather_condition, regex("rain", ignore_case = TRUE)), 1, 0), # 1 if 'rain' is present
+    snow = if_else(str_detect(weather_condition, regex("snow", ignore_case = TRUE)), 1, 0),  # 1 if 'snow' is present
+    roof_binary = if_else(roof %in% c("outdoors", "open"), 0, 1),
+    new_wind = ifelse(grepl("[0-9]", wind),
+                      as.numeric(gsub("[^0-9.-]", "", wind)), NA)
+  )
+
+### Creating binary variable for field type (turf or grass)
+combined_data <- combined_data %>% 
+  mutate(turf = ifelse(surface == "grass", 0, 1))
+
+
+# removing plays considered "qb kneel" or "qb spike" as injuries would not happen on these plays
+combined_data <- combined_data %>%
+  filter(!(play_type %in% c("qb_kneel", "qb_spike")))
+
+
+# filtering out plays that are listed as timeouts
+# filtering out plays with pre-snap penalties so no play happened --> kept plays that have penalties later as someone could have gotten injured during the play
+combined_data <- combined_data %>% 
+  filter(
+    !str_detect(desc, regex("(?i)timeout")) & # Remove rows containing "timeout" or "Timeout"
+      !str_detect(desc, regex("^\\(\\d{1,2}:\\d{2}\\) PENALTY")) & # Remove rows starting with "(time) PENALTY"
+      !str_detect(desc, regex("^\\(\\d{1,2}:\\d{2}\\) \\(.*\\) PENALTY")) & # Remove rows with "(time) (something) PENALTY"
+      !str_detect(desc, regex("^\\(\\s*:\\d{2}\\) \\(.*\\) PENALTY")) & # Check for malformed time with something like (Shotgun) before PENALTY
+      !str_detect(desc, regex("^\\(\\s*:\\d{2}\\) PENALTY")) & # Check for malformed time where PENALTY directly follows
+      !str_detect(desc, regex("^\\(.*\\) PENALTY")) & 
+      desc != "*** play under review ***"
+  )
+
+# creating categorical play type variable (0 = rush, 1 = pass, 2 = special teams)
+combined_data <- combined_data %>%
+  mutate(
+    PlayType = case_when(
+      rush == 1 ~ 0, # Rush play
+      pass == 1 ~ 1, # Pass play
+      rush == 0 & pass == 0 & special == 0 & str_detect(desc, regex("punts|kicks|field goal", ignore_case = TRUE)) ~ 2, # Special teams play
+      TRUE ~ 3 # Other plays
+    )
+  )
+
+test3 <- combined_data %>%
+  filter(PlayType == 3)
+
+# removing any plays not listed as special teams, run or pass (likely presnap penalty that was not able to be filtered out)
+combined_data <- combined_data %>%
+  filter(PlayType %in% c(0,1,2))
+
+combined_data$position <- as.character(combined_data$position)
+# removing any instances were the position is not a valid position, or not NA (has odd entry) - NA position would mean there was no one injured on play which is why those are fine to keep
+combined_data <- combined_data %>%
+  filter(position %in% c("C", "CB", "DE", "DT", "FB", "G", "K", "LB", "LS", "P", "QB", "RB", "S", "T", "TE", "WR") | is.na(position))
+
+
 
 ########## Exploratory Data Analysis ##########
-count_data <- as.data.frame(table(new_data$in_game_injury))
+
+##### 1) Play count of injury vs non-injury plays #####
+# Getting count of in game injuries using in_game_injury variable
+count_data <- as.data.frame(table(combined_data$in_game_injury))
 colnames(count_data) <- c("Injuries", "count")
 
 ggplot(count_data, aes(x = factor(Injuries), y = count)) +
@@ -168,10 +231,11 @@ ggplot(count_data, aes(x = factor(Injuries), y = count)) +
   scale_x_discrete(labels = c("No Injury", "Injury")) +
   theme_minimal()
 
-####
+##### 2) Knee vs Lower Body Injuries of Plays with Injuries #####
+# Getting count of knee injuries & lower body injuries
 injury_counts <- data.frame(
   variable = c("Knee", "Lower Body"),
-  count = c(sum(new_data$knee_injury_in_game == 1, na.rm = TRUE), sum(new_data$lower_body_injury_in_game == 1))
+  count = c(sum(combined_data$knee_injury_in_game == 1, na.rm = TRUE), sum(combined_data$lower_body_injury_in_game == 1))
 )
 ggplot(injury_counts, aes(x = variable, y = count)) +
   geom_bar(stat = "identity") +
@@ -181,8 +245,8 @@ ggplot(injury_counts, aes(x = variable, y = count)) +
   scale_x_discrete(labels = c("Knee Injuries", "Lower Body Injuries")) +
   theme_minimal()
 
-####
-new_data %>%
+##### 3) In game injuries for each team #####
+combined_data %>%
   group_by(player_inj_team) %>%
   summarize(count = sum(in_game_injury == 1, na.rm = TRUE)) %>%
   filter(count > 0) %>%
@@ -193,20 +257,13 @@ new_data %>%
        title = "Number of In Game Injuries for Each NFL Team (2010-2024)") + 
   theme_minimal()
 
-####
+##### 4) Injuries by field type ####
+# cleaning up field types
+combined_data$surface <- trimws(combined_data$surface, which = "right")
+combined_data$surface <- ifelse(combined_data$surface == "a_turf", "astroturf", combined_data$surface)
 
-new_data$surface <- trimws(new_data$surface, which = "right")
-
-new_data$surface <- ifelse(new_data$surface == "a_turf", "astroturf", new_data$surface)
-
-surface_type_inj <- data.frame(
-  variable = c("Knee", "Lower Body"),
-  count = c(sum(new_data$knee_injury_in_game == 1, na.rm = TRUE), sum(new_data$lower_body_injury_in_game == 1))
-  
-)
-
-####
-summary_data <- new_data %>%
+# creating summary data of the amount of plays and injuries on each surface
+summary_data <- combined_data %>%
   filter(surface != "") %>%
   group_by(surface) %>%
   summarise(
@@ -219,7 +276,7 @@ summary_data <- new_data %>%
     values_to = "count"
   )
 
-# Create the bar chart
+# Creating the bar chart
 ggplot(summary_data, aes(x = surface, y = count, fill = category)) +
   geom_bar(stat = "identity", position = "dodge") +
   scale_fill_manual(
@@ -236,149 +293,227 @@ ggplot(summary_data, aes(x = surface, y = count, fill = category)) +
   geom_text(aes(label = count), 
             position = position_dodge(width = 0.9),
             vjust = -0.5)
-  
-### CREATING MORE VARIABLES
-new_data <- new_data %>%
-  mutate(field_type = ifelse(surface == "grass", 0, 1))
 
 
-data <- new_data %>%
-  select(
-    game_id,                   # To identify unique plays
-    field_type,                   # Hypothesis 1 & 2: Turf vs. grass impact
-    roof,
-    in_game_injury,
-    knee_injury_in_game,       # Hypothesis 1: Focus on knee injuries
-    lower_body_injury_in_game, # Hypothesis 2: Lower body injuries
-    temp,                      # Hypothesis 3: Weather conditions
-    wind,                      # Hypothesis 3: Weather conditions
-    position,                  # Hypothesis 4: Skill position players
-    qtr,                       # Game dynamics (early vs. late injury patterns)
-    rush,              # Offensive plays that could impact injuries
-    pass,              # Offensive plays that could impact injuries
-    special,
-    quarter_seconds_remaining, # Time remaining in the current quarter
-    weather
-  )
-
-
-
-newnew_data <- data %>%
-  mutate(
-    # Extract weather condition (e.g., "Light Rain")
-    weather_condition = str_extract(weather, "^[^:]+"),
-    
-    # Extract temperature (numeric value in Fahrenheit)
-    temperature = as.numeric(str_extract(weather, "(?<=Temp: )\\d+")),
-    
-    # Extract humidity (numeric value as a percentage)
-    humidity = as.numeric(str_extract(weather, "(?<=Humidity: )\\d+")),
-    
-    # Extract wind (direction and speed)
-    wind = str_extract(weather, "(?<=Wind: ).+")
-  )
-
-
-newnew_data <- newnew_data %>%
-  mutate(
-    rain = if_else(str_detect(weather_condition, regex("rain", ignore_case = TRUE)), 1, 0), # 1 if 'rain' is present
-    snow = if_else(str_detect(weather_condition, regex("snow", ignore_case = TRUE)), 1, 0),  # 1 if 'snow' is present
-    roof_binary = if_else(roof %in% c("outdoors", "open"), 0, 1)
-  )
-
-
-data <- newnew_data %>%
+########## Variable Selection ##########
+data <- combined_data %>%
   select(
     game_id, 
-    field_type, # Hypothesis 1 & 2: Turf vs. grass impact
+    turf, # Hypothesis 1 & 2: Turf vs. grass impact (turf = 1, grass = 0)
     roof_binary,
     knee_injury_in_game,       # Hypothesis 1: Focus on knee injuries
     lower_body_injury_in_game, # Hypothesis 2: Lower body injuries
     in_game_injury,
     position,                  # Hypothesis 4: Skill position players
     qtr,                       # Game dynamics (early vs. late injury patterns)
-    rush,              # Offensive plays that could impact injuries
-    pass,              # Offensive plays that could impact injuries
-    special,
+    PlayType,
     quarter_seconds_remaining, # Time remaining in the current quarter
     temperature, 
-    wind, 
+    new_wind, 
     humidity,
     rain, 
-    snow
+    snow,
+    down,
+    week
   )
-data$position <- as.character(data$position)
 
-data <- data %>% 
-  filter(position %in% c("C", "CB", "DE", "DT", "FB", "G", "K", "LB", "LS", "P", "QB", "RB", "S", "T", "TE", "WR"))
 
+########## CORRELATION ##########
+numeric_columns <- data[, sapply(data, is.numeric)]
+
+# Compute the correlation matrix
+cor_matrix <- cor(numeric_columns, use = "pairwise.complete.obs")
+
+# Melt the correlation matrix for ggplot
+cor_data <- melt(cor_matrix)
+color_scale <- colorRampPalette(c("blue", "white", "red"))
+
+# Create the correlation plot
+corrplot(cor_matrix, method = "color", type = "lower", 
+         tl.col = "black", tl.srt = 45, 
+         addCoef.col = "black", # Add correlation coefficients
+         number.cex = 0.7,      # Adjust text size
+         col = color_scale(200), # Apply flipped color scale
+         cl.pos = "r",          # Position of the color legend
+         cl.cex = 0.8) 
+
+########## Preparing for modeling ##########
+data$turf <- as.factor(data$turf)
+data$knee_injury_in_game <- as.factor(data$knee_injury_in_game)
+data$lower_body_injury_in_game <- as.factor(data$lower_body_injury_in_game)
+data$in_game_injury <- as.factor(data$in_game_injury)
+data$rain <- as.factor(data$rain)
+data$snow <- as.factor(data$snow)
+data$PlayType <- as.factor(data$PlayType)
+data$qtr <- as.factor(data$qtr)
+data$roof_binary <- as.factor(data$roof_binary)
+data$down <- as.factor(data$down)
+data$week <- as.factor(data$week)
 data$position <- as.factor(data$position)
 
 
-data <- data %>%
-  mutate(new_wind = ifelse(
-    grepl("[0-9]", wind), # Check if there are any numeric characters
-    as.numeric(gsub("[^0-9.-]", "", wind)), # Extract numeric value
-    NA # Assign NA for rows without numeric content
-  ))
 
-# Lower Body Injury Model
+########## TRAIN AND TEST SETS ##########
+set.seed(123)
 
-lb_model_reg <- lm(lower_body_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
-            quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+### LOWER BODY INJURIES ###
+# Perform stratified sampling
+lb_train_index <- createDataPartition(data$lower_body_injury_in_game, p = 0.75, list = FALSE)  # 70% training set
+
+# Split the data
+lb_train_data <- data[lb_train_index, ]
+lb_test_data <- data[-lb_train_index, ]
+
+# Check proportions
+table(data$lower_body_injury_in_game)   
+table(lb_train_data$lower_body_injury_in_game) 
+table(lb_test_data$lower_body_injury_in_game)
+
+
+### KNEE INJURIES ###
+knee_train_index <- createDataPartition(data$knee_injury_in_game, p = 0.75, list = FALSE)  # 70% training set
+
+# Split the data
+knee_train_data <- data[knee_train_index, ]
+knee_test_data <- data[-knee_train_index, ]
+
+# Check proportions
+table(data$knee_injury_in_game)       
+table(knee_train_data$knee_injury_in_game) 
+table(knee_test_data$knee_injury_in_game)
+
+
+### ALL INJURIES ###
+data$in_game_injury <- as.numeric(data$in_game_injury)
+train_index <- createDataPartition(data$in_game_injury, p = 0.75, list = FALSE)  # 70% training set
+
+# Split the data
+train_data <- data[train_index, ]
+test_data <- data[-train_index, ]
+
+# Check proportions
+table(data$in_game_injury)       # Full dataset
+table(train_data$in_game_injury) # Training set
+table(test_data$in_game_injury)
+
+
+########## Model Creation ##########
+
+### Lower Body Injury Model ###
+lb_model_reg <- glm(lower_body_injury_in_game ~ turf + roof_binary + position + 
+                    qtr + PlayType + quarter_seconds_remaining + temperature +
+                    new_wind + humidity + rain + snow + down + week, 
+                    data = lb_train_data,
+                    family = binomial)
 
 summary(lb_model_reg)
 
+probabilities <- predict(lb_model_reg, newdata = lb_test_data, type = "response")
+predictions <- ifelse(probabilities > 0.5, 1, 0)
+confusion_matrix <- table(Predicted = predictions, Actual = lb_test_data$lower_body_injury_in_game)
+print(confusion_matrix)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
 
 
-lb_model_log <- logistf(lower_body_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
-                     quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+
+
+lb_model_log <- logistf(lower_body_injury_in_game ~ turf + roof_binary + position + 
+                          qtr + PlayType + quarter_seconds_remaining + temperature +
+                          new_wind + humidity + rain + snow + down + week, 
+                        data = lb_train_data)
 
 summary(lb_model_log)
+probabilities <- predict(lb_model_log, newdata = lb_test_data, type = "response")
+predictions <- ifelse(probabilities > 0.5, 1, 0)
+confusion_matrix <- table(Predicted = predictions, Actual = lb_test_data$lower_body_injury_in_game)
+print(confusion_matrix)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
 
 
-# Knee Injury model
-knee_model_reg <- lm(knee_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
-                     quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+### Knee Injury Model ###
+knee_model_reg <- glm(knee_injury_in_game ~ turf + roof_binary + position + qtr +
+                      PlayType + quarter_seconds_remaining + temperature +
+                      new_wind + humidity + rain + snow + down + week,
+                      data = knee_train_data, 
+                      family = binomial)
 
 summary(knee_model_reg)
 
+probabilities <- predict(knee_model_reg, newdata = knee_test_data)
+predictions <- ifelse(probabilities > 0.5, 1, 0)
+confusion_matrix <- table(Predicted = predictions, Actual = knee_test_data$knee_injury_in_game)
+print(confusion_matrix)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
 
 
-knee_model_log <- logistf(knee_injury_in_game ~ field_type + roof_binary + position + qtr + rush + pass + special +
-                          quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+
+
+knee_model_log <- logistf(knee_injury_in_game ~ turf + roof_binary + position + qtr +
+                            PlayType + quarter_seconds_remaining + temperature +
+                            new_wind + humidity + rain + snow + down + week,
+                          data = knee_train_data)
 
 summary(knee_model_log)
+probabilities <- predict(knee_model_log, newdata = knee_test_data)
+predictions <- ifelse(probabilities > 0.5, 1, 0)
+confusion_matrix <- table(Predicted = predictions, Actual = knee_test_data$knee_injury_in_game)
+print(confusion_matrix)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
 
 
-# All injury model
-model_reg <- lm(in_game_injury ~ field_type + roof_binary + position + qtr + rush + pass + special +
-                       quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+### All injury model ###
+#data$in_game_injury <- as.numeric(data$in_game_injury)
+data$in_game_injury <- ifelse(data$in_game_injury == 1, 0, 1)
+train_index <- createDataPartition(data$in_game_injury, p = 0.75, list = FALSE)  # 70% training set
+
+# Split the data
+train_data <- data[train_index, ]
+test_data <- data[-train_index, ]
+
+# Check proportions
+table(data$in_game_injury)       # Full dataset
+table(train_data$in_game_injury) # Training set
+table(test_data$in_game_injury)
+
+#data$in_game_injury <- as.numeric(data$in_game_injury)
+model_reg <- glm(in_game_injury ~ turf + roof_binary + position + qtr + PlayType +
+                       quarter_seconds_remaining + temperature + new_wind 
+                 + humidity + rain + snow + down + week, data = train_data,
+                 family = binomial)
 
 summary(model_reg)
+probabilities <- predict(model_reg, newdata = test_data)
+predictions <- ifelse(probabilities > 0.5, 1, 0)
+confusion_matrix <- table(Predicted = predictions, Actual = test_data$in_game_injury)
+print(confusion_matrix)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
 
 
 
-model_log <- logistf(in_game_injury ~ field_type + roof_binary + position + qtr + rush + pass + special +
-                            quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow, data = data)
+model_log <- logistf(in_game_injury ~ turf + roof_binary + position + qtr + PlayType +
+                       quarter_seconds_remaining + temperature + new_wind +
+                       humidity + rain + snow + down + week, data = train_data)
 
+#####
+#library(car)
+#vif_values <- vif(lm(in_game_injury ~ field_type + roof_binary + position + qtr + #rush + pass +
+#                       quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow + down + week, data = train_data))
+#print(vif_values)
+#####
+#####
 summary(model_log)
+probabilities <- predict(model_log, newdata = test_data)
+predictions <- ifelse(probabilities > 0.5, 1, 0)
+confusion_matrix <- table(Predicted = predictions, Actual = test_data$injury_in_game)
+print(confusion_matrix)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
 
 
 
-
-########## Other things to add ##########
-
-# 1) Correlation, initial feature importance, EDA of variables (plays w/ injuries vs plays w/o injuries)
-# 2) Create model
-# 3) Evaluate using accuracy, precision, recall, ...
-
-# Correlation (get rid of anything below 0.2)
-# Base model to get rid of any features that don't have any impact
- 
- 
-
-# CREATE VARIABLE FOR WHETHER PLAY WAS INVOLVED IN THE PLAY (Touched ball or made tackle)
-# MAKE variables 0, 1, 2 for some of injury variables
-# Ex) Knee injury in game --> 0 = no injury, 1 = injury but not knee, 2 = knee injury on play 
 

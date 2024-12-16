@@ -1,3 +1,7 @@
+save.image(file = "my_environment.RData")
+setwd("C:/Users/brady/Downloads")
+load("my_environment.RData")
+
 ### Loading in all necessary libraries ###
 library(nflreadr)
 library(dplyr)
@@ -337,72 +341,178 @@ corrplot(cor_matrix, method = "color", type = "lower",
          cl.pos = "r",          # Position of the color legend
          cl.cex = 0.8) 
 
+########## More Data Cleaning ##########
+# removing rows with snow, rain or temp NA values because tougher to impute those
+new_data <- data %>% 
+  select(-new_wind) %>% 
+  filter(!is.na(rain) & !is.na(snow) & !is.na(temperature))
+
+# creating humidity predictions (using temp and whether there was rain/snow)
+# want to keep this variable as higher humidity could lead to less field traction --> more potential injuries
+humidity_model <- lm(humidity ~ temperature + rain + snow, data = new_data, na.action = na.exclude)
+new_data$humidity[is.na(new_data$humidity)] <- predict(humidity_model, newdata = new_data[is.na(new_data$humidity), ])
+
+
+# checking NA count of all columns
+colSums(is.na(new_data))
+
+# adding new level to positions so it allows for predictions in modeling (if position is NA it won't be able to predict)
+new_data$position <- ifelse(is.na(new_data$position), "No Injury", new_data$position)
+
+# removing all other NA values in the dataset
+new_data <- new_data %>% na.omit()
+
 ########## Preparing for modeling ##########
-data$turf <- as.factor(data$turf)
-data$knee_injury_in_game <- as.factor(data$knee_injury_in_game)
-data$lower_body_injury_in_game <- as.factor(data$lower_body_injury_in_game)
-data$in_game_injury <- as.factor(data$in_game_injury)
-data$rain <- as.factor(data$rain)
-data$snow <- as.factor(data$snow)
-data$PlayType <- as.factor(data$PlayType)
-data$qtr <- as.factor(data$qtr)
-data$roof_binary <- as.factor(data$roof_binary)
-data$down <- as.factor(data$down)
-data$week <- as.factor(data$week)
-data$position <- as.factor(data$position)
+new_data$turf <- as.factor(new_data$turf)
+new_data$knee_injury_in_game <- as.factor(new_data$knee_injury_in_game)
+new_data$lower_body_injury_in_game <- as.factor(new_data$lower_body_injury_in_game)
+new_data$in_game_injury <- as.factor(new_data$in_game_injury)
+new_data$rain <- as.factor(new_data$rain)
+new_data$snow <- as.factor(new_data$snow)
+new_data$PlayType <- as.factor(new_data$PlayType)
+new_data$qtr <- as.factor(new_data$qtr)
+new_data$roof_binary <- as.factor(new_data$roof_binary)
+new_data$down <- as.factor(new_data$down)
+new_data$week <- as.factor(new_data$week)
+new_data$position <- as.factor(new_data$position)
+
+
+
 
 
 
 ########## TRAIN AND TEST SETS ##########
+########## 
+########## 
+########## 
+########## DONT TOUCH/RESET TEST-TRAIN SETS ##########
+########## 
+########## 
+########## 
 set.seed(123)
 
 ### LOWER BODY INJURIES ###
 # Perform stratified sampling
-lb_train_index <- createDataPartition(data$lower_body_injury_in_game, p = 0.75, list = FALSE)  # 70% training set
+lb_train_index <- createDataPartition(new_data$lower_body_injury_in_game, p = 0.75, list = FALSE)  # 70% training set
 
 # Split the data
-lb_train_data <- data[lb_train_index, ]
-lb_test_data <- data[-lb_train_index, ]
+lb_train_data <- new_data[lb_train_index, ]
+lb_test_data <- new_data[-lb_train_index, ]
 
 # Check proportions
-table(data$lower_body_injury_in_game)   
+table(new_data$lower_body_injury_in_game)   
 table(lb_train_data$lower_body_injury_in_game) 
 table(lb_test_data$lower_body_injury_in_game)
 
 
 ### KNEE INJURIES ###
-knee_train_index <- createDataPartition(data$knee_injury_in_game, p = 0.75, list = FALSE)  # 70% training set
+knee_train_index <- createDataPartition(new_data$knee_injury_in_game, p = 0.75, list = FALSE)  # 70% training set
 
 # Split the data
-knee_train_data <- data[knee_train_index, ]
-knee_test_data <- data[-knee_train_index, ]
+knee_train_data <- new_data[knee_train_index, ]
+knee_test_data <- new_data[-knee_train_index, ]
 
 # Check proportions
-table(data$knee_injury_in_game)       
+table(new_data$knee_injury_in_game)       
 table(knee_train_data$knee_injury_in_game) 
 table(knee_test_data$knee_injury_in_game)
 
 
 ### ALL INJURIES ###
-data$in_game_injury <- as.numeric(data$in_game_injury)
-train_index <- createDataPartition(data$in_game_injury, p = 0.75, list = FALSE)  # 70% training set
+#data$in_game_injury <- as.numeric(data$in_game_injury)
+train_index <- createDataPartition(new_data$in_game_injury, p = 0.75, list = FALSE)  # 70% training set
 
 # Split the data
-train_data <- data[train_index, ]
-test_data <- data[-train_index, ]
+train_data <- new_data[train_index, ]
+test_data <- new_data[-train_index, ]
+
+train_data$in_game_injury <- as.factor(train_data$in_game_injury)
+test_data$in_game_injury <- as.factor(test_data$in_game_injury)
 
 # Check proportions
-table(data$in_game_injury)       # Full dataset
+table(new_data$in_game_injury)       # Full dataset
 table(train_data$in_game_injury) # Training set
 table(test_data$in_game_injury)
 
 
-########## Model Creation ##########
+### Function for calculating model evaluation metrics
+compute_metrics <- function(conf_matrix) {
+  # Extract dimensions of the confusion matrix
+  classes <- rownames(conf_matrix)
+  
+  # Initialize variables for confusion matrix values
+  TP <- 0  # True Positives
+  FP <- 0  # False Positives
+  FN <- 0  # False Negatives
+  TN <- 0  # True Negatives
+  
+  # Check for the presence of both predicted classes
+  if ("1" %in% classes) {
+    TP <- conf_matrix["1", "1"]
+    FP <- conf_matrix["1", "0"]
+  }
+  if ("0" %in% classes) {
+    TN <- conf_matrix["0", "0"]
+    FN <- conf_matrix["0", "1"]
+  }
+  
+  # Calculate metrics for Class 1
+  precision_1 <- ifelse((TP + FP) > 0, TP / (TP + FP), NA)
+  recall_1 <- ifelse((TP + FN) > 0, TP / (TP + FN), NA)
+  f1_score_1 <- ifelse(!is.na(precision_1) & !is.na(recall_1) & (precision_1 + recall_1) > 0,
+                       2 * (precision_1 * recall_1) / (precision_1 + recall_1), NA)
+  
+  # Calculate metrics for Class 0
+  precision_0 <- ifelse((TN + FN) > 0, TN / (TN + FN), NA)
+  recall_0 <- ifelse((TN + FP) > 0, TN / (TN + FP), NA)
+  f1_score_0 <- ifelse(!is.na(precision_0) & !is.na(recall_0) & (precision_0 + recall_0) > 0,
+                       2 * (precision_0 * recall_0) / (precision_0 + recall_0), NA)
+  
+  # Overall metrics
+  accuracy <- (TP + TN) / sum(conf_matrix)
+  specificity <- ifelse((TN + FP) > 0, TN / (TN + FP), NA)
+  
+  # Print metrics in a clean format
+  cat("\n### Metrics for Each Class ###\n")
+  cat("Class 1 (Injury Class):\n")
+  cat("  Precision:  ", ifelse(!is.na(precision_1), round(precision_1, 4), "NA"), "\n")
+  cat("  Recall:     ", ifelse(!is.na(recall_1), round(recall_1, 4), "NA"), "\n")
+  cat("  F1 Score:   ", ifelse(!is.na(f1_score_1), round(f1_score_1, 4), "NA"), "\n")
+  
+  cat("\nClass 0 (No Injury Class):\n")
+  cat("  Precision:  ", ifelse(!is.na(precision_0), round(precision_0, 4), "NA"), "\n")
+  cat("  Recall:     ", ifelse(!is.na(recall_0), round(recall_0, 4), "NA"), "\n")
+  cat("  F1 Score:   ", ifelse(!is.na(f1_score_0), round(f1_score_0, 4), "NA"), "\n")
+  
+  cat("\n### Overall Metrics ###\n")
+  cat("  Accuracy:    ", round(accuracy, 4), "\n")
+  cat("  Specificity: ", ifelse(!is.na(specificity), round(specificity, 4), "NA"), "\n")
 
-### Lower Body Injury Model ###
+}
+
+######################### Model Creation #########################
+
+############### Lower Body Injury Model ###############
+
+####### Logistic Regression #######
+lb_train_data$position <- as.factor(trimws(lb_train_data$position))
+lb_test_data$position <- as.factor(trimws(lb_test_data$position))
+
+# dropping "P" and "K" position level - model struggled to learn from it
+lb_train_data <- subset(lb_train_data, (position %in% c("C", "CB", "DE", "DT", "FB", "G", "LB", "LS", "QB", "RB", "S", "T", "TE", "WR", "No Injury")))
+lb_train_data <- droplevels(lb_train_data)
+lb_test_data <- subset(lb_test_data, (position %in% c("C", "CB", "DE", "DT", "FB", "G", "LB", "LS", "QB", "RB", "S", "T", "TE", "WR", "No Injury")))
+lb_test_data <- droplevels(lb_test_data)
+
+# removing week 22 since there is none in that level in train & only 1 in test
+lb_train_data <- subset(lb_train_data, week != 22)
+lb_train_data <- droplevels(lb_train_data)
+lb_test_data <- subset(lb_test_data, week != 22)
+lb_test_data <- subset(lb_test_data)
+
 lb_model_reg <- glm(lower_body_injury_in_game ~ turf + roof_binary + position + 
                     qtr + PlayType + quarter_seconds_remaining + temperature +
-                    new_wind + humidity + rain + snow + down + week, 
+                    humidity + rain + snow + down + week, 
                     data = lb_train_data,
                     family = binomial)
 
@@ -412,30 +522,64 @@ probabilities <- predict(lb_model_reg, newdata = lb_test_data, type = "response"
 predictions <- ifelse(probabilities > 0.5, 1, 0)
 confusion_matrix <- table(Predicted = predictions, Actual = lb_test_data$lower_body_injury_in_game)
 print(confusion_matrix)
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-print(paste("Accuracy:", accuracy))
+compute_metrics(confusion_matrix)
 
 
 
+####### Firth's Logistic Regression #######
+lb_train_new <- lb_train_data %>%
+  select(turf, roof_binary, lower_body_injury_in_game, position, qtr, PlayType, 
+         quarter_seconds_remaining, temperature, humidity, rain, snow,
+         down, week)
 
-lb_model_log <- logistf(lower_body_injury_in_game ~ turf + roof_binary + position + 
-                          qtr + PlayType + quarter_seconds_remaining + temperature +
-                          new_wind + humidity + rain + snow + down + week, 
-                        data = lb_train_data)
+lb_test_new <- lb_test_data %>%
+  select(turf, roof_binary, lower_body_injury_in_game, position, qtr, PlayType, 
+         quarter_seconds_remaining, temperature, humidity, rain, snow,
+         down, week)
+
+
+lb_model_log <- logistf(lower_body_injury_in_game ~ ., data = lb_train_new)
 
 summary(lb_model_log)
-probabilities <- predict(lb_model_log, newdata = lb_test_data, type = "response")
+
+design_matrix_train <- model.matrix(lb_model_log$formula, data = lb_train_new)
+design_matrix_test <- model.matrix(lb_model_log$formula, data = lb_test_new)
+
+cat("Training matrix dimensions:", dim(design_matrix_train), "\n")
+cat("Training matrix dimensions:", dim(design_matrix_test), "\n")
+
+# Need to remove the week 22 variable from the test set
+lb_test_new <- subset(lb_test_new, week != 22)
+lb_test_new <- droplevels(lb_test_new)
+
+
+probabilities <- predict(lb_model_log, newdata = lb_test_new)
 predictions <- ifelse(probabilities > 0.5, 1, 0)
-confusion_matrix <- table(Predicted = predictions, Actual = lb_test_data$lower_body_injury_in_game)
+confusion_matrix <- table(Predicted = predictions, Actual = lb_test_new$lower_body_injury_in_game)
 print(confusion_matrix)
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-print(paste("Accuracy:", accuracy))
+compute_metrics(confusion_matrix)
+#accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+#print(paste("Accuracy:", accuracy))
 
 
-### Knee Injury Model ###
+############## Knee Injury Model ###############
+
+####### Logistic Regression #######
+
+# dropping the 6th qtr because of rare event issues --> model isn't learning from it
+knee_train_data <- subset(knee_train_data, qtr != 6)
+knee_test_data <- subset(knee_test_data, qtr != 6)
+knee_train_data <- droplevels(knee_train_data)
+knee_test_data <- droplevels(knee_test_data)
+
+# need to drop 'K' from position in training data
+knee_train_data <- subset(knee_train_data, (position %in% c("C", "CB", "DE", "DT", "FB", "G", "LB", "LS", "QB", "RB", "P", "S", "T", "TE", "WR", "No Injury")))
+knee_train_data <- droplevels(knee_train_data)
+
+
 knee_model_reg <- glm(knee_injury_in_game ~ turf + roof_binary + position + qtr +
                       PlayType + quarter_seconds_remaining + temperature +
-                      new_wind + humidity + rain + snow + down + week,
+                      humidity + rain + snow + down + week,
                       data = knee_train_data, 
                       family = binomial)
 
@@ -445,43 +589,78 @@ probabilities <- predict(knee_model_reg, newdata = knee_test_data)
 predictions <- ifelse(probabilities > 0.5, 1, 0)
 confusion_matrix <- table(Predicted = predictions, Actual = knee_test_data$knee_injury_in_game)
 print(confusion_matrix)
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-print(paste("Accuracy:", accuracy))
+compute_metrics(confusion_matrix)
+
+####### Firth's Logistic Regression #######
+knee_train_new <- knee_train_data %>%
+  select(turf, roof_binary, knee_injury_in_game, position, qtr, PlayType, 
+         quarter_seconds_remaining, temperature, humidity, rain, snow,
+         down, week)
+
+knee_test_new <- knee_test_data %>%
+  select(turf, roof_binary, knee_injury_in_game, position, qtr, PlayType, 
+         quarter_seconds_remaining, temperature, humidity, rain, snow,
+         down, week)
+
+knee_train_new <- subset(knee_train_new, 
+                         (position %in% c("C", "CB", "DE", "DT", "FB", "G", "LB", "LS", "QB", "RB", "S", "T", "TE", "WR", "No Injury")))
+knee_train_new <- droplevels(knee_train_new)
 
 
-
-
-knee_model_log <- logistf(knee_injury_in_game ~ turf + roof_binary + position + qtr +
-                            PlayType + quarter_seconds_remaining + temperature +
-                            new_wind + humidity + rain + snow + down + week,
-                          data = knee_train_data)
+knee_model_log <- logistf(knee_injury_in_game ~ ., data = knee_train_new)
 
 summary(knee_model_log)
-probabilities <- predict(knee_model_log, newdata = knee_test_data)
+
+# need to fix data because of errors with making predictions
+# creating design matricies to debug the issue
+#design_matrix_train <- model.matrix(knee_model_log$formula, data = knee_train_new)
+#design_matrix_test <- model.matrix(knee_model_log$formula, data = knee_test_new)
+
+#cat("Training matrix dimensions:", dim(design_matrix_train), "\n")
+#cat("Training matrix dimensions:", dim(design_matrix_test), "\n")
+
+# need to drop 'K' from position in training data
+#knee_train_new <- subset(knee_train_new, (position %in% c("C", "CB", "DE", "DT", "FB", "G", "LB", "LS", "QB", "RB", "P", "S", "T", "TE", "WR", "No Injury")))
+#knee_train_new <- droplevels(knee_train_new)
+
+#knee_model_log <- logistf(knee_injury_in_game ~ ., data = knee_train_new)
+#summary(knee_model_log)
+
+probabilities <- predict(knee_model_log, newdata = knee_test_new)
 predictions <- ifelse(probabilities > 0.5, 1, 0)
-confusion_matrix <- table(Predicted = predictions, Actual = knee_test_data$knee_injury_in_game)
+confusion_matrix <- table(Predicted = predictions, Actual = knee_test_new$knee_injury_in_game)
 print(confusion_matrix)
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-print(paste("Accuracy:", accuracy))
+compute_metrics(confusion_matrix)
 
 
-### All injury model ###
-#data$in_game_injury <- as.numeric(data$in_game_injury)
-data$in_game_injury <- ifelse(data$in_game_injury == 1, 0, 1)
-train_index <- createDataPartition(data$in_game_injury, p = 0.75, list = FALSE)  # 70% training set
+############### All injury model ###############
 
-# Split the data
-train_data <- data[train_index, ]
-test_data <- data[-train_index, ]
+####### Logistic Regression #######
 
-# Check proportions
-table(data$in_game_injury)       # Full dataset
-table(train_data$in_game_injury) # Training set
-table(test_data$in_game_injury)
+# dropping the 6th qtr because of rare event issues --> model isn't learning from it
+# dropping the unused levels
+train_data <- subset(train_data, qtr != 6)
+train_data <- droplevels(train_data)
+test_data <- subset(test_data, qtr != 6)
+test_data <- droplevels(test_data)
 
-#data$in_game_injury <- as.numeric(data$in_game_injury)
+# dropping the week 22 rows (model was struggling to learn with it)
+train_data <- subset(train_data, week != 22)
+train_data <- droplevels(train_data)
+test_data <- subset(test_data, week != 22)
+test_data <- droplevels(test_data)
+
+# Dropping kicker & punter position because train set doesn't have it while test set does
+# can't learn off levels it didn't intially know
+train_data <- subset(train_data, (position %in% c("C", "CB", "DE", "DT", "FB", "G", "LB", "LS", "QB", "RB", "S", "T", "TE", "WR", "No Injury")))
+test_data <- subset(test_data, (position %in% c("C", "CB", "DE", "DT", "FB", "G", "LB", "LS", "QB", "RB", "S", "T", "TE", "WR", "No Injury")))
+
+# Setting week factor levels to match
+test_data$week <- factor(test_data$week, levels = levels(train_data$week))
+test_data$position <- factor(test_data$position, levels = levels(train_data$position))
+
 model_reg <- glm(in_game_injury ~ turf + roof_binary + position + qtr + PlayType +
-                       quarter_seconds_remaining + temperature + new_wind 
+                       quarter_seconds_remaining + temperature  
                  + humidity + rain + snow + down + week, data = train_data,
                  family = binomial)
 
@@ -490,29 +669,49 @@ probabilities <- predict(model_reg, newdata = test_data)
 predictions <- ifelse(probabilities > 0.5, 1, 0)
 confusion_matrix <- table(Predicted = predictions, Actual = test_data$in_game_injury)
 print(confusion_matrix)
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-print(paste("Accuracy:", accuracy))
+compute_metrics(confusion_matrix)
 
 
+####### Firth's Logistic Regression #######
 
+# getting rid of unneeded columns in training & testing data
+train_data_new <- train_data %>%
+  select(turf, roof_binary, in_game_injury, position, qtr, PlayType, 
+         quarter_seconds_remaining, temperature, humidity, rain, snow,
+         down, week)
+
+test_data_new <- test_data %>%
+  select(turf, roof_binary, in_game_injury, position, qtr, PlayType, 
+         quarter_seconds_remaining, temperature, humidity, rain, snow,
+         down, week)
+
+# check that factors align
+test_data_new$turf <- factor(test_data_new$turf, levels = levels(train_data_new$turf))
+test_data_new$roof_binary <- factor(test_data_new$roof_binary, levels = levels(train_data_new$roof_binary))
+test_data_new$position <- factor(test_data_new$position, levels = levels(train_data_new$position))
+test_data_new$qtr <- factor(test_data_new$qtr, levels = levels(train_data_new$qtr))
+test_data_new$PlayType <- factor(test_data_new$PlayType, levels = levels(train_data_new$PlayType))
+test_data_new$rain <- factor(test_data_new$rain, levels = levels(train_data_new$rain))
+test_data_new$snow <- factor(test_data_new$snow, levels = levels(train_data_new$snow))
+test_data_new$down <- factor(test_data_new$down, levels = levels(train_data_new$down))
+test_data_new$week <- factor(test_data_new$week, levels = levels(train_data_new$week))
+
+# dropping 'P' position level - already got rid of it but the level is still showing up
+test_data_new <- droplevels(test_data_new)
+train_data_new <- droplevels(train_data_new)
+
+# creating model
 model_log <- logistf(in_game_injury ~ turf + roof_binary + position + qtr + PlayType +
-                       quarter_seconds_remaining + temperature + new_wind +
-                       humidity + rain + snow + down + week, data = train_data)
+                       quarter_seconds_remaining + temperature + humidity +
+                       rain + snow + down + week, data = train_data_new)
 
-#####
-#library(car)
-#vif_values <- vif(lm(in_game_injury ~ field_type + roof_binary + position + qtr + #rush + pass +
-#                       quarter_seconds_remaining + temperature + new_wind + humidity + rain + snow + down + week, data = train_data))
-#print(vif_values)
-#####
-#####
 summary(model_log)
-probabilities <- predict(model_log, newdata = test_data)
+
+probabilities <- predict(model_log, newdata = test_data_new)
 predictions <- ifelse(probabilities > 0.5, 1, 0)
-confusion_matrix <- table(Predicted = predictions, Actual = test_data$injury_in_game)
+confusion_matrix <- table(Predicted = predictions, Actual = test_data_new$in_game_injury)
 print(confusion_matrix)
-accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-print(paste("Accuracy:", accuracy))
+compute_metrics(confusion_matrix)
 
 
 

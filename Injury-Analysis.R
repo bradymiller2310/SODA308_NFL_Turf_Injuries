@@ -714,5 +714,79 @@ print(confusion_matrix)
 compute_metrics(confusion_matrix)
 
 
+############### Hypothesis testing ###############
+
+####### Knee injuries in wet conditions #######
+wet_con_data <- new_data %>%
+  mutate(wet_conditions = ifelse(snow == 1 | rain == 1, 1, 0)) %>%
+  select(-c(rain, snow, game_id, lower_body_injury_in_game, in_game_injury))
+
+wet_con_data$wet_conditions <- as.factor(wet_con_data$wet_conditions)
+
+# not going to use the week or humidity variables
+testmodel <- glm(knee_injury_in_game ~ turf*wet_conditions + roof_binary + 
+                   position + qtr + PlayType + quarter_seconds_remaining + 
+                   temperature + down,
+                 data = wet_con_data, 
+                 family = binomial)
+summary(testmodel)
+
+testmodellog <- logistf(knee_injury_in_game ~ turf*wet_conditions + roof_binary + 
+                          position + qtr + PlayType + quarter_seconds_remaining + 
+                          temperature + down,
+                        data = wet_con_data)
 
 
+
+####### Skill position & knee injures #######
+skill_knee_data <- new_data %>%
+  mutate(skill_position = ifelse(position %in% c("CB", "QB", "RB", "S", "TE", "WR"), 1, 0)) %>%
+  select(-c(game_id, lower_body_injury_in_game, in_game_injury))
+
+
+skill_knee_model <- glm(knee_injury_in_game ~ turf * skill_position + roof_binary + 
+                          qtr + PlayType + quarter_seconds_remaining + temperature + 
+                          rain + snow + down, data = skill_knee_data,
+                        family = binomial)
+
+
+summary(skill_knee_model)
+
+####### Lineman & ankle injuries #######
+lineman_ankle_data <- combined_data %>%
+  select(turf, roof_binary, in_game_injury, position, qtr, PlayType, 
+         quarter_seconds_remaining, temperature, humidity, rain, 
+         snow, down, week, report_primary_injury) %>%
+  filter(!is.na(rain) & !is.na(snow) & !is.na(temperature)) %>%
+  mutate(ankle_injury = ifelse(in_game_injury == 1 & report_primary_injury == "Ankle", 1, 0),
+         lineman = ifelse(position %in% c("DE", "DT", "G", "T", "C"), 1, 0)) %>%
+  select(-c(in_game_injury, position, report_primary_injury))
+
+# creating humidity predictions (using temp and whether there was rain/snow)
+# want to keep this variable as higher humidity could lead to less field traction --> more potential injuries
+humidity_model <- lm(humidity ~ temperature + rain + snow, data = lineman_ankle_data, na.action = na.exclude)
+lineman_ankle_data$humidity[is.na(lineman_ankle_data$humidity)] <- predict(humidity_model, newdata = lineman_ankle_data[is.na(lineman_ankle_data$humidity), ])
+
+
+
+# removing all other NA values in the dataset
+lineman_ankle_data <- lineman_ankle_data %>% na.omit()
+
+########## Preparing for modeling ##########
+lineman_ankle_data$turf <- as.factor(lineman_ankle_data$turf)
+lineman_ankle_data$rain <- as.factor(lineman_ankle_data$rain)
+lineman_ankle_data$snow <- as.factor(lineman_ankle_data$snow)
+lineman_ankle_data$PlayType <- as.factor(lineman_ankle_data$PlayType)
+lineman_ankle_data$qtr <- as.factor(lineman_ankle_data$qtr)
+lineman_ankle_data$roof_binary <- as.factor(lineman_ankle_data$roof_binary)
+lineman_ankle_data$down <- as.factor(lineman_ankle_data$down)
+lineman_ankle_data$lineman <- as.factor(lineman_ankle_data$lineman)
+lineman_ankle_data$ankle_injury <- as.factor(lineman_ankle_data$ankle_injury)
+
+lineman_ankle_model <- glm(ankle_injury ~ turf * lineman + roof_binary + 
+                          qtr + PlayType + quarter_seconds_remaining + temperature + 
+                          rain + snow + down, data = lineman_ankle_data,
+                        family = binomial)
+
+
+summary(lineman_ankle_model)
